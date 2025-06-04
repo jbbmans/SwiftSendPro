@@ -1,0 +1,1609 @@
+<script>
+// ====================================
+// SWIFTSEND PRO v3.0 - ENHANCED CRM
+// Complete JavaScript implementation
+// ====================================
+
+// Global State Management
+const AppState = {
+    currentTab: 'contacts',
+    userData: null,
+    contacts: [],
+    callLogs: [],
+    campaigns: [],
+    templates: [],
+    crmSchema: {
+        fields: []
+    },
+    quotaInfo: {
+        remaining: 0,
+        total: 1500
+    },
+    selectedContacts: new Set(),
+    emailRecipients: new Set(),
+    filters: {
+        contacts: 'all',
+        search: ''
+    },
+    viewMode: 'grid',
+    isHtmlView: false
+};
+
+// ====================================
+// INITIALIZATION
+// ====================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    initializeApp();
+});
+
+async function initializeApp() {
+    try {
+        showLoadingScreen('Initializing your CRM...');
+        
+        // Initialize user session and load data
+        updateLoadingText('Loading your data from Google Drive...');
+        const result = await runGoogleScript('initializeUserSession');
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to initialize session');
+        }
+        
+        // Store user data
+        AppState.userData = result.userData;
+        AppState.quotaInfo = result.quotaInfo;
+        
+        // Update UI with user data
+        updateUserInterface();
+        
+        // Load initial data
+        updateLoadingText('Loading contacts...');
+        await loadContacts();
+        
+        updateLoadingText('Setting up interface...');
+        initializeUI();
+        
+        // Hide loading screen
+        hideLoadingScreen();
+        
+        // Show welcome message
+        const name = AppState.userData.profile.name || 'there';
+        showToast(`Welcome back, ${name}!`, 'success');
+        
+    } catch (error) {
+        console.error('Initialization error:', error);
+        hideLoadingScreen();
+        showError('Failed to initialize: ' + error.message);
+    }
+}
+
+function updateUserInterface() {
+    const profile = AppState.userData.profile;
+    
+    // Update user info in sidebar
+    document.getElementById('userName').textContent = profile.name || profile.email.split('@')[0];
+    document.getElementById('userEmail').textContent = profile.email;
+    
+    // Update avatar with profile picture or first letter
+    const avatarElement = document.getElementById('userAvatar');
+    if (profile.photoUrl) {
+        avatarElement.innerHTML = `<img src="${profile.photoUrl}" alt="Profile" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    } else {
+        const firstLetter = (profile.name || profile.email)[0].toUpperCase();
+        avatarElement.innerHTML = `<span>${firstLetter}</span>`;
+    }
+    
+    // Update quota display
+    const quotaPercentage = ((AppState.quotaInfo.total - AppState.quotaInfo.remaining) / AppState.quotaInfo.total) * 100;
+    document.getElementById('quotaFill').style.width = quotaPercentage + '%';
+    document.getElementById('quotaUsed').textContent = AppState.quotaInfo.total - AppState.quotaInfo.remaining;
+    document.getElementById('quotaTotal').textContent = AppState.quotaInfo.total;
+    
+    // Set view mode from preferences
+    AppState.viewMode = profile.settings?.viewMode || 'grid';
+    updateViewMode();
+    
+    // Update counts
+    updateCounts();
+}
+
+function initializeUI() {
+    // Initialize event listeners
+    initializeEventListeners();
+    
+    // Load CRM schema
+    AppState.crmSchema = AppState.userData.crmSchema;
+    
+    // Initialize editor
+    initializeEditor();
+    
+    // Set default values from profile
+    if (AppState.userData.profile.settings) {
+        document.getElementById('fromName').value = AppState.userData.profile.settings.defaultFromName || '';
+        document.getElementById('replyTo').value = AppState.userData.profile.settings.defaultReplyTo || '';
+    }
+}
+
+// ====================================
+// NAVIGATION
+// ====================================
+
+function navigateTo(tab) {
+    AppState.currentTab = tab;
+    
+    // Update tab visibility
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    document.getElementById(tab).classList.add('active');
+    
+    // Update navigation
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+    
+    // Update page title
+    const titles = {
+        'contacts': 'Contacts',
+        'calls': 'Call Logs',
+        'crm-settings': 'CRM Settings',
+        'compose': 'Compose Email',
+        'templates': 'Email Templates',
+        'campaigns': 'Campaigns',
+        'analytics': 'Analytics',
+        'import': 'Import Contacts',
+        'export': 'Export Data'
+    };
+    
+    document.getElementById('pageTitle').textContent = titles[tab] || tab;
+    
+    // Tab-specific actions
+    switch(tab) {
+        case 'contacts':
+            displayContacts();
+            break;
+        case 'calls':
+            displayCallLogs();
+            break;
+        case 'crm-settings':
+            displayCRMSettings();
+            break;
+        case 'compose':
+            updateMergeTags();
+            updateRecipientCount();
+            break;
+        case 'templates':
+            displayTemplates();
+            break;
+        case 'campaigns':
+            displayCampaigns();
+            break;
+        case 'analytics':
+            displayAnalytics();
+            break;
+    }
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ====================================
+// CONTACT MANAGEMENT
+// ====================================
+
+async function loadContacts() {
+    try {
+        const result = await runGoogleScript('getContacts');
+        if (result.success) {
+            AppState.contacts = result.contacts;
+            AppState.crmSchema = result.schema;
+            
+            // Update call logs count
+            if (result.callLogsCount !== undefined) {
+                document.getElementById('callCount').textContent = result.callLogsCount;
+            }
+            
+            displayContacts();
+            updateCounts();
+            updateSelectionUI();
+        }
+    } catch (error) {
+        showError('Failed to load contacts: ' + error.message);
+    }
+}
+
+function displayContacts() {
+    let contacts = AppState.contacts;
+    
+    // Apply search filter
+    if (AppState.filters.search) {
+        const search = AppState.filters.search.toLowerCase();
+        contacts = contacts.filter(contact => {
+            return Object.values(contact).some(value => 
+                value && value.toString().toLowerCase().includes(search)
+            );
+        });
+    }
+    
+    // Apply filter
+    switch(AppState.filters.contacts) {
+        case 'recent':
+            contacts = contacts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10);
+            break;
+        case 'has-calls':
+            contacts = contacts.filter(c => c.lastCallDate);
+            break;
+        case 'no-calls':
+            contacts = contacts.filter(c => !c.lastCallDate);
+            break;
+    }
+    
+    if (contacts.length === 0) {
+        const emptyHtml = `
+            <div class="empty-state">
+                <i class="fas fa-users"></i>
+                <p>${AppState.filters.search ? 'No contacts match your search' : 'No contacts yet'}</p>
+                ${!AppState.filters.search ? '<button class="btn btn-primary" onclick="showContactForm()">Add Your First Contact</button>' : ''}
+            </div>
+        `;
+        document.getElementById('contactsGrid').innerHTML = emptyHtml;
+        document.getElementById('contactsList').innerHTML = emptyHtml;
+        return;
+    }
+    
+    // Update selected contacts count
+    AppState.selectedContacts = new Set(contacts.filter(c => c.selected).map(c => c.id));
+    updateSelectionUI();
+    
+    if (AppState.viewMode === 'grid') {
+        displayContactsGrid(contacts);
+    } else {
+        displayContactsList(contacts);
+    }
+}
+
+function displayContactsGrid(contacts) {
+    const container = document.getElementById('contactsGrid');
+    
+    container.innerHTML = contacts.map(contact => `
+        <div class="contact-card ${contact.selected ? 'selected' : ''}" data-id="${contact.id}">
+            <div class="contact-selection">
+                <input type="checkbox" 
+                       class="contact-checkbox" 
+                       ${contact.selected ? 'checked' : ''} 
+                       onclick="toggleContactSelection('${contact.id}')">
+            </div>
+            <div class="contact-header">
+                <div class="contact-avatar">
+                    ${contact.photoUrl ? 
+                        `<img src="${contact.photoUrl}" alt="${contact.firstName || ''}" />` :
+                        getContactInitials(contact)
+                    }
+                </div>
+                <div class="contact-actions">
+                    <button class="icon-btn" onclick="editContact('${contact.id}')" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="icon-btn" onclick="logCallForContact('${contact.id}')" title="Log Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="icon-btn" onclick="emailSingleContact('${contact.id}')" title="Send Email">
+                        <i class="fas fa-envelope"></i>
+                    </button>
+                    <button class="icon-btn danger" onclick="deleteContactConfirm('${contact.id}')" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="contact-body">
+                <h4>${contact.firstName || ''} ${contact.lastName || ''}</h4>
+                <p class="contact-email">${contact.email}</p>
+                ${contact.company ? `<p class="contact-company"><i class="fas fa-building"></i> ${contact.company}</p>` : ''}
+                ${contact.phone ? `<p class="contact-phone"><i class="fas fa-phone"></i> ${contact.phone}</p>` : ''}
+                ${contact.office ? `<p class="contact-office"><i class="fas fa-map-marker-alt"></i> ${contact.office}</p>` : ''}
+                ${contact.lastCallDate ? `
+                    <div class="contact-last-call">
+                        <i class="fas fa-clock"></i>
+                        Last call: ${formatDate(contact.lastCallDate)}
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function displayContactsList(contacts) {
+    const container = document.getElementById('contactsList');
+    
+    container.innerHTML = `
+        <div class="list-header">
+            <div class="list-col-checkbox">
+                <input type="checkbox" onclick="toggleAllContacts(this.checked)">
+            </div>
+            <div class="list-col-avatar"></div>
+            <div class="list-col-name">Name</div>
+            <div class="list-col-email">Email</div>
+            <div class="list-col-phone">Phone</div>
+            <div class="list-col-company">Company</div>
+            <div class="list-col-actions">Actions</div>
+        </div>
+        <div class="list-body">
+            ${contacts.map(contact => `
+                <div class="list-row ${contact.selected ? 'selected' : ''}" data-id="${contact.id}">
+                    <div class="list-col-checkbox">
+                        <input type="checkbox" 
+                               class="contact-checkbox" 
+                               ${contact.selected ? 'checked' : ''} 
+                               onclick="toggleContactSelection('${contact.id}')">
+                    </div>
+                    <div class="list-col-avatar">
+                        <div class="contact-avatar-small">
+                            ${contact.photoUrl ? 
+                                `<img src="${contact.photoUrl}" alt="${contact.firstName || ''}" />` :
+                                getContactInitials(contact)
+                            }
+                        </div>
+                    </div>
+                    <div class="list-col-name">
+                        <strong>${contact.firstName || ''} ${contact.lastName || ''}</strong>
+                        ${contact.position ? `<br><small class="text-muted">${contact.position}</small>` : ''}
+                    </div>
+                    <div class="list-col-email">${contact.email}</div>
+                    <div class="list-col-phone">${contact.phone || '-'}</div>
+                    <div class="list-col-company">
+                        ${contact.company || '-'}
+                        ${contact.office ? `<br><small class="text-muted">${contact.office}</small>` : ''}
+                    </div>
+                    <div class="list-col-actions">
+                        <button class="icon-btn" onclick="editContact('${contact.id}')" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="icon-btn" onclick="logCallForContact('${contact.id}')" title="Log Call">
+                            <i class="fas fa-phone"></i>
+                        </button>
+                        <button class="icon-btn" onclick="emailSingleContact('${contact.id}')" title="Send Email">
+                            <i class="fas fa-envelope"></i>
+                        </button>
+                        <button class="icon-btn danger" onclick="deleteContactConfirm('${contact.id}')" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function getContactInitials(contact) {
+    const firstName = contact.firstName || '';
+    const lastName = contact.lastName || '';
+    
+    if (firstName && lastName) {
+        return firstName[0] + lastName[0];
+    } else if (firstName) {
+        return firstName.substring(0, 2);
+    } else if (contact.email) {
+        return contact.email.substring(0, 2).toUpperCase();
+    }
+    return 'NA';
+}
+
+function showContactForm(contactId = null) {
+    const modal = document.getElementById('contactModal');
+    const title = document.getElementById('contactModalTitle');
+    const form = document.getElementById('contactFormFields');
+    
+    title.textContent = contactId ? 'Edit Contact' : 'Add Contact';
+    
+    // Generate form fields based on CRM schema
+    const contact = contactId ? AppState.contacts.find(c => c.id === contactId) : {};
+    
+    form.innerHTML = AppState.crmSchema.fields.map(field => {
+        const value = contact[field.id] || '';
+        const required = field.required ? 'required' : '';
+        
+        switch(field.type) {
+            case 'textarea':
+                return `
+                    <div class="form-group">
+                        <label class="form-label">${field.name} ${field.required ? '<span class="required">*</span>' : ''}</label>
+                        <textarea class="form-textarea" name="${field.id}" ${required}>${value}</textarea>
+                    </div>
+                `;
+            case 'select':
+                return `
+                    <div class="form-group">
+                        <label class="form-label">${field.name} ${field.required ? '<span class="required">*</span>' : ''}</label>
+                        <select class="form-select" name="${field.id}" ${required}>
+                            <option value="">Select...</option>
+                            ${(field.options || []).map(opt => 
+                                `<option value="${opt}" ${value === opt ? 'selected' : ''}>${opt}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                `;
+            default:
+                return `
+                    <div class="form-group">
+                        <label class="form-label">${field.name} ${field.required ? '<span class="required">*</span>' : ''}</label>
+                        <input type="${field.type}" class="form-input" name="${field.id}" value="${value}" ${required}>
+                    </div>
+                `;
+        }
+    }).join('');
+    
+    // Store contact ID for saving
+    form.dataset.contactId = contactId || '';
+    
+    modal.classList.add('show');
+}
+
+async function saveContact() {
+    const form = document.getElementById('contactFormFields');
+    const contactId = form.dataset.contactId;
+    
+    // Collect form data
+    const contactData = { id: contactId };
+    const inputs = form.querySelectorAll('input, select, textarea');
+    
+    for (const input of inputs) {
+        contactData[input.name] = input.value;
+    }
+    
+    // Validate required fields
+    const requiredFields = AppState.crmSchema.fields.filter(f => f.required);
+    for (const field of requiredFields) {
+        if (!contactData[field.id]) {
+            showToast(`${field.name} is required`, 'error');
+            return;
+        }
+    }
+    
+    try {
+        const result = await runGoogleScript('saveContact', contactData);
+        if (result.success) {
+            showToast(contactId ? 'Contact updated!' : 'Contact added!', 'success');
+            closeModal('contactModal');
+            await loadContacts();
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        showError('Failed to save contact: ' + error.message);
+    }
+}
+
+function editContact(contactId) {
+    showContactForm(contactId);
+}
+
+async function deleteContactConfirm(contactId) {
+    const contact = AppState.contacts.find(c => c.id === contactId);
+    const name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email;
+    
+    if (confirm(`Are you sure you want to delete ${name}?`)) {
+        try {
+            const result = await runGoogleScript('deleteContact', contactId);
+            if (result.success) {
+                showToast('Contact deleted', 'success');
+                await loadContacts();
+            }
+        } catch (error) {
+            showError('Failed to delete contact: ' + error.message);
+        }
+    }
+}
+
+function searchContacts() {
+    AppState.filters.search = document.getElementById('contactSearch').value;
+    displayContacts();
+}
+
+function filterContacts() {
+    AppState.filters.contacts = document.getElementById('contactFilter').value;
+    displayContacts();
+}
+
+// ====================================
+// VIEW MODE MANAGEMENT
+// ====================================
+
+function setViewMode(mode) {
+    AppState.viewMode = mode;
+    updateViewMode();
+    
+    // Save preference
+    if (AppState.userData) {
+        AppState.userData.profile.settings.viewMode = mode;
+        runGoogleScript('updateProfile', { settings: { viewMode: mode } });
+    }
+}
+
+function updateViewMode() {
+    const gridBtn = document.getElementById('gridViewBtn');
+    const listBtn = document.getElementById('listViewBtn');
+    const gridContainer = document.getElementById('contactsGrid');
+    const listContainer = document.getElementById('contactsList');
+    
+    if (AppState.viewMode === 'grid') {
+        gridBtn.classList.add('active');
+        listBtn.classList.remove('active');
+        gridContainer.style.display = 'grid';
+        listContainer.style.display = 'none';
+    } else {
+        listBtn.classList.add('active');
+        gridBtn.classList.remove('active');
+        gridContainer.style.display = 'none';
+        listContainer.style.display = 'block';
+    }
+    
+    displayContacts();
+}
+
+// ====================================
+// CONTACT SELECTION
+// ====================================
+
+async function toggleContactSelection(contactId) {
+    try {
+        const result = await runGoogleScript('toggleContactSelection', contactId);
+        if (result.success) {
+            const contact = AppState.contacts.find(c => c.id === contactId);
+            if (contact) {
+                contact.selected = result.contact.selected;
+                if (contact.selected) {
+                    AppState.selectedContacts.add(contactId);
+                } else {
+                    AppState.selectedContacts.delete(contactId);
+                }
+                displayContacts();
+                updateSelectionUI();
+            }
+        }
+    } catch (error) {
+        showError('Failed to update selection: ' + error.message);
+    }
+}
+
+function toggleAllContacts(selected) {
+    runGoogleScript('selectAllContacts', selected)
+        .then(result => {
+            if (result.success) {
+                AppState.contacts.forEach(contact => {
+                    contact.selected = selected;
+                });
+                displayContacts();
+                updateSelectionUI();
+            }
+        });
+}
+
+function updateSelectionUI() {
+    const selectedCount = AppState.selectedContacts.size;
+    document.getElementById('selectedCount').textContent = selectedCount;
+    document.getElementById('selectedContactsCount').textContent = selectedCount;
+    
+    const selectionActions = document.getElementById('selectionActions');
+    if (selectedCount > 0) {
+        selectionActions.style.display = 'flex';
+    } else {
+        selectionActions.style.display = 'none';
+    }
+}
+
+function clearSelection() {
+    toggleAllContacts(false);
+}
+
+function emailSelected() {
+    navigateTo('compose');
+    document.querySelector('input[name="recipientType"][value="selected"]').checked = true;
+    updateRecipientSelection();
+}
+
+function emailSingleContact(contactId) {
+    const contact = AppState.contacts.find(c => c.id === contactId);
+    if (contact) {
+        contact.selected = true;
+        runGoogleScript('toggleContactSelection', contactId).then(() => {
+            emailSelected();
+        });
+    }
+}
+
+// ====================================
+// GOOGLE CONTACTS IMPORT
+// ====================================
+
+async function importGoogleContacts() {
+    try {
+        showLoading('Importing contacts from Google...');
+        const result = await runGoogleScript('importGoogleContacts');
+        hideLoading();
+        
+        if (result.success) {
+            showToast(`Successfully imported ${result.imported} contacts!`, 'success');
+            await loadContacts();
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        hideLoading();
+        showError('Failed to import Google Contacts: ' + error.message);
+    }
+}
+
+// ====================================
+// EMAIL RECIPIENT SELECTION
+// ====================================
+
+function updateRecipientSelection() {
+    const type = document.querySelector('input[name="recipientType"]:checked').value;
+    const specificSelector = document.getElementById('specificContactsSelector');
+    const filterOptions = document.getElementById('recipientFilterOptions');
+    
+    // Hide all options first
+    specificSelector.style.display = 'none';
+    filterOptions.style.display = 'none';
+    
+    switch(type) {
+        case 'specific':
+            specificSelector.style.display = 'block';
+            populateEmailContactsList();
+            break;
+        case 'filter':
+            filterOptions.style.display = 'block';
+            populateFilterFields();
+            break;
+    }
+    
+    updateRecipientCount();
+}
+
+function populateEmailContactsList() {
+    const container = document.getElementById('emailContactsList');
+    
+    container.innerHTML = AppState.contacts.map(contact => {
+        const isSelected = AppState.emailRecipients.has(contact.id);
+        return `
+            <div class="email-contact-item ${isSelected ? 'selected' : ''}">
+                <input type="checkbox" 
+                       id="emailContact_${contact.id}"
+                       ${isSelected ? 'checked' : ''}
+                       onchange="toggleEmailRecipient('${contact.id}')">
+                <label for="emailContact_${contact.id}">
+                    <div class="contact-avatar-small">
+                        ${contact.photoUrl ? 
+                            `<img src="${contact.photoUrl}" alt="${contact.firstName || ''}" />` :
+                            getContactInitials(contact)
+                        }
+                    </div>
+                    <div class="contact-info">
+                        <div class="contact-name">${contact.firstName || ''} ${contact.lastName || ''}</div>
+                        <div class="contact-email-small">${contact.email}</div>
+                    </div>
+                </label>
+            </div>
+        `;
+    }).join('');
+}
+
+function toggleEmailRecipient(contactId) {
+    if (AppState.emailRecipients.has(contactId)) {
+        AppState.emailRecipients.delete(contactId);
+    } else {
+        AppState.emailRecipients.add(contactId);
+    }
+    
+    // Update UI
+    const item = document.querySelector(`.email-contact-item input[id="emailContact_${contactId}"]`).parentElement;
+    item.classList.toggle('selected');
+    
+    updateRecipientCount();
+}
+
+function filterEmailContacts(search) {
+    const items = document.querySelectorAll('.email-contact-item');
+    const searchLower = search.toLowerCase();
+    
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(searchLower)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+function selectAllEmailContacts() {
+    AppState.contacts.forEach(contact => {
+        AppState.emailRecipients.add(contact.id);
+    });
+    populateEmailContactsList();
+    updateRecipientCount();
+}
+
+function deselectAllEmailContacts() {
+    AppState.emailRecipients.clear();
+    populateEmailContactsList();
+    updateRecipientCount();
+}
+
+function populateFilterFields() {
+    const select = document.getElementById('filterField');
+    select.innerHTML = '<option value="">Select field...</option>' +
+        AppState.crmSchema.fields.map(field => 
+            `<option value="${field.id}">${field.name}</option>`
+        ).join('');
+}
+
+function applyRecipientFilter() {
+    const field = document.getElementById('filterField').value;
+    const value = document.getElementById('filterValue').value.toLowerCase();
+    
+    if (!field || !value) {
+        showToast('Please select a field and enter a filter value', 'warning');
+        return;
+    }
+    
+    // Apply filter
+    const filtered = AppState.contacts.filter(contact => {
+        const contactValue = (contact[field] || '').toString().toLowerCase();
+        return contactValue.includes(value);
+    });
+    
+    showToast(`Filter applied: ${filtered.length} contacts match`, 'success');
+    updateRecipientCount();
+}
+
+// ====================================
+// HTML EDITOR TOGGLE
+// ====================================
+
+function toggleHtmlView() {
+    const wysiwygEditor = document.getElementById('emailContent');
+    const htmlEditor = document.getElementById('htmlEditor');
+    const htmlTextarea = document.getElementById('htmlContent');
+    const btn = event.target.closest('.toolbar-btn');
+    
+    AppState.isHtmlView = !AppState.isHtmlView;
+    
+    if (AppState.isHtmlView) {
+        // Switch to HTML view
+        htmlTextarea.value = wysiwygEditor.innerHTML;
+        wysiwygEditor.style.display = 'none';
+        htmlEditor.style.display = 'block';
+        btn.classList.add('active');
+    } else {
+        // Switch to WYSIWYG view
+        wysiwygEditor.innerHTML = htmlTextarea.value;
+        wysiwygEditor.style.display = 'block';
+        htmlEditor.style.display = 'none';
+        btn.classList.remove('active');
+    }
+}
+
+async function displayCallLogs() {
+    try {
+        const result = await runGoogleScript('getCallLogs');
+        if (result.success) {
+            AppState.callLogs = result.callLogs;
+            renderCallLogs();
+            updateCallStats();
+        }
+    } catch (error) {
+        showError('Failed to load call logs: ' + error.message);
+    }
+}
+
+function renderCallLogs() {
+    const container = document.getElementById('callLogsList');
+    
+    if (AppState.callLogs.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-phone-slash"></i>
+                <p>No call logs yet</p>
+                <button class="btn btn-primary" onclick="showCallLogForm()">
+                    Log Your First Call
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by date, newest first
+    const logs = AppState.callLogs.sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    
+    container.innerHTML = logs.map(log => {
+        const contact = AppState.contacts.find(c => c.id === log.contactId);
+        const contactName = contact ? 
+            `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email : 
+            'Unknown Contact';
+        
+        return `
+            <div class="call-log-item">
+                <div class="call-log-header">
+                    <div class="call-log-contact">
+                        <i class="fas fa-user"></i>
+                        ${contactName}
+                    </div>
+                    <div class="call-log-date">
+                        ${formatDateTime(log.timestamp)}
+                    </div>
+                </div>
+                <div class="call-log-body">
+                    <div class="call-log-details">
+                        <span class="call-outcome outcome-${log.outcome}">
+                            ${formatCallOutcome(log.outcome)}
+                        </span>
+                        <span class="call-duration">
+                            <i class="fas fa-clock"></i>
+                            ${log.duration} min
+                        </span>
+                    </div>
+                    ${log.notes ? `<div class="call-log-notes">${log.notes}</div>` : ''}
+                    ${log.nextCallDate ? `
+                        <div class="call-log-next">
+                            <i class="fas fa-calendar"></i>
+                            Next call: ${formatDate(log.nextCallDate)}
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateCallStats() {
+    const today = new Date().toDateString();
+    const todayCalls = AppState.callLogs.filter(log => 
+        new Date(log.timestamp).toDateString() === today
+    );
+    
+    const upcomingCalls = AppState.contacts.filter(contact => 
+        contact.nextCallDate && new Date(contact.nextCallDate) >= new Date()
+    );
+    
+    document.getElementById('totalCallsCount').textContent = AppState.callLogs.length;
+    document.getElementById('todayCallsCount').textContent = todayCalls.length;
+    document.getElementById('upcomingCallsCount').textContent = upcomingCalls.length;
+}
+
+function showCallLogForm(contactId = null) {
+    const modal = document.getElementById('callLogModal');
+    const form = document.getElementById('callLogForm');
+    
+    // Reset form
+    form.reset();
+    
+    // Set current date/time
+    const now = new Date();
+    document.getElementById('callDateTime').value = now.toISOString().slice(0, 16);
+    
+    // Populate contact dropdown
+    const select = document.getElementById('callContactId');
+    select.innerHTML = '<option value="">Select a contact...</option>' +
+        AppState.contacts.map(contact => {
+            const name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email;
+            return `<option value="${contact.id}" ${contact.id === contactId ? 'selected' : ''}>${name}</option>`;
+        }).join('');
+    
+    modal.classList.add('show');
+}
+
+function logCallForContact(contactId) {
+    showCallLogForm(contactId);
+}
+
+async function saveCallLog() {
+    const callData = {
+        contactId: document.getElementById('callContactId').value,
+        dateTime: document.getElementById('callDateTime').value,
+        duration: parseInt(document.getElementById('callDuration').value) || 0,
+        outcome: document.getElementById('callOutcome').value,
+        notes: document.getElementById('callNotes').value,
+        nextCallDate: document.getElementById('nextCallDate').value
+    };
+    
+    if (!callData.contactId) {
+        showToast('Please select a contact', 'error');
+        return;
+    }
+    
+    if (!callData.duration || callData.duration < 1) {
+        showToast('Please enter call duration', 'error');
+        return;
+    }
+    
+    try {
+        const result = await runGoogleScript('logCall', callData);
+        if (result.success) {
+            showToast('Call logged successfully!', 'success');
+            closeModal('callLogModal');
+            await loadContacts(); // Refresh to update last call info
+            if (AppState.currentTab === 'calls') {
+                await displayCallLogs();
+            }
+        }
+    } catch (error) {
+        showError('Failed to log call: ' + error.message);
+    }
+}
+
+function formatCallOutcome(outcome) {
+    const outcomes = {
+        'answered': 'Answered',
+        'voicemail': 'Voicemail',
+        'no-answer': 'No Answer',
+        'busy': 'Busy',
+        'wrong-number': 'Wrong Number',
+        'scheduled': 'Scheduled'
+    };
+    return outcomes[outcome] || outcome;
+}
+
+// ====================================
+// CRM SETTINGS
+// ====================================
+
+function displayCRMSettings() {
+    const container = document.getElementById('crmFieldsList');
+    const fields = AppState.crmSchema.fields;
+    
+    container.innerHTML = fields.map((field, index) => `
+        <div class="field-item" data-index="${index}">
+            <div class="field-info">
+                <input type="text" class="form-input" value="${field.name}" 
+                       onchange="updateFieldName(${index}, this.value)" 
+                       ${field.id === 'email' ? 'disabled' : ''}>
+                <select class="form-select" onchange="updateFieldType(${index}, this.value)"
+                        ${field.id === 'email' ? 'disabled' : ''}>
+                    <option value="text" ${field.type === 'text' ? 'selected' : ''}>Text</option>
+                    <option value="email" ${field.type === 'email' ? 'selected' : ''}>Email</option>
+                    <option value="phone" ${field.type === 'phone' ? 'selected' : ''}>Phone</option>
+                    <option value="number" ${field.type === 'number' ? 'selected' : ''}>Number</option>
+                    <option value="date" ${field.type === 'date' ? 'selected' : ''}>Date</option>
+                    <option value="textarea" ${field.type === 'textarea' ? 'selected' : ''}>Text Area</option>
+                    <option value="select" ${field.type === 'select' ? 'selected' : ''}>Dropdown</option>
+                </select>
+                <label class="checkbox-label">
+                    <input type="checkbox" ${field.required ? 'checked' : ''} 
+                           onchange="updateFieldRequired(${index}, this.checked)"
+                           ${field.id === 'email' ? 'disabled' : ''}>
+                    <span>Required</span>
+                </label>
+            </div>
+            <div class="field-actions">
+                ${field.id !== 'email' ? `
+                    <button class="icon-btn danger" onclick="removeField(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateFieldName(index, value) {
+    AppState.crmSchema.fields[index].name = value;
+}
+
+function updateFieldType(index, value) {
+    AppState.crmSchema.fields[index].type = value;
+}
+
+function updateFieldRequired(index, value) {
+    AppState.crmSchema.fields[index].required = value;
+}
+
+function removeField(index) {
+    if (confirm('Remove this field? Existing data in this field will be preserved but hidden.')) {
+        AppState.crmSchema.fields.splice(index, 1);
+        displayCRMSettings();
+    }
+}
+
+function addCustomField() {
+    const fieldId = 'custom_' + Date.now();
+    AppState.crmSchema.fields.push({
+        id: fieldId,
+        name: 'New Field',
+        type: 'text',
+        required: false
+    });
+    displayCRMSettings();
+}
+
+async function saveCRMSettings() {
+    try {
+        const result = await runGoogleScript('updateCRMFields', AppState.crmSchema.fields);
+        if (result.success) {
+            showToast('CRM settings saved!', 'success');
+        }
+    } catch (error) {
+        showError('Failed to save settings: ' + error.message);
+    }
+}
+
+// ====================================
+// EMAIL CAMPAIGNS
+// ====================================
+
+function updateMergeTags() {
+    const container = document.getElementById('mergeTags');
+    container.innerHTML = AppState.crmSchema.fields.map(field => 
+        `<button class="tag" onclick="insertTag('{{${field.id}}}')" title="${field.name}">{{${field.id}}}</button>`
+    ).join('');
+}
+
+function insertTag(tag) {
+    const activeElement = document.activeElement;
+    
+    if (activeElement.id === 'emailSubject') {
+        const input = activeElement;
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        const text = input.value;
+        input.value = text.substring(0, start) + tag + text.substring(end);
+        input.setSelectionRange(start + tag.length, start + tag.length);
+        input.focus();
+    } else {
+        // Insert into email content
+        document.execCommand('insertText', false, tag);
+    }
+}
+
+function updateRecipientSelection() {
+    const type = document.querySelector('input[name="recipientType"]:checked').value;
+    const filterOptions = document.getElementById('recipientFilterOptions');
+    
+    if (type === 'filter') {
+        filterOptions.style.display = 'block';
+        // Add filter UI here
+    } else {
+        filterOptions.style.display = 'none';
+    }
+    
+    updateRecipientCount();
+}
+
+function updateRecipientCount() {
+    const type = document.querySelector('input[name="recipientType"]:checked').value;
+    let count = 0;
+    
+    switch(type) {
+        case 'all':
+            count = AppState.contacts.length;
+            break;
+        case 'selected':
+            count = AppState.selectedContacts.size;
+            break;
+        case 'specific':
+            count = AppState.emailRecipients.size;
+            break;
+        case 'filter':
+            // Apply current filter
+            const field = document.getElementById('filterField')?.value;
+            const value = document.getElementById('filterValue')?.value?.toLowerCase();
+            if (field && value) {
+                count = AppState.contacts.filter(contact => {
+                    const contactValue = (contact[field] || '').toString().toLowerCase();
+                    return contactValue.includes(value);
+                }).length;
+            }
+            break;
+    }
+    
+    document.getElementById('selectedRecipientCount').textContent = count;
+    document.getElementById('allContactsCount').textContent = AppState.contacts.length;
+}
+
+async function sendTestEmail() {
+    const testEmail = prompt('Enter email address for test:');
+    if (!testEmail || !testEmail.includes('@')) {
+        return;
+    }
+    
+    const emailData = {
+        testEmail: testEmail,
+        subject: document.getElementById('emailSubject').value,
+        htmlBody: document.getElementById('emailContent').innerHTML,
+        fromName: document.getElementById('fromName').value,
+        replyTo: document.getElementById('replyTo').value,
+        testData: AppState.contacts[0] || { firstName: 'Test', email: testEmail }
+    };
+    
+    try {
+        showLoading('Sending test email...');
+        const result = await runGoogleScript('sendTestEmail', emailData);
+        hideLoading();
+        
+        if (result.success) {
+            showToast('Test email sent!', 'success');
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        hideLoading();
+        showError('Failed to send test: ' + error.message);
+    }
+}
+
+async function sendCampaign() {
+    const type = document.querySelector('input[name="recipientType"]:checked').value;
+    let recipients = [];
+    
+    // Get recipients based on selection
+    switch(type) {
+        case 'all':
+            recipients = AppState.contacts;
+            break;
+        case 'selected':
+            recipients = AppState.contacts.filter(c => c.selected);
+            break;
+        case 'specific':
+            recipients = AppState.contacts.filter(c => AppState.emailRecipients.has(c.id));
+            break;
+        case 'filter':
+            const field = document.getElementById('filterField').value;
+            const value = document.getElementById('filterValue').value?.toLowerCase();
+            if (field && value) {
+                recipients = AppState.contacts.filter(contact => {
+                    const contactValue = (contact[field] || '').toString().toLowerCase();
+                    return contactValue.includes(value);
+                });
+            }
+            break;
+    }
+    
+    if (recipients.length === 0) {
+        showToast('No recipients selected', 'error');
+        return;
+    }
+    
+    // Get email content - check if in HTML view
+    let htmlBody;
+    if (AppState.isHtmlView) {
+        htmlBody = document.getElementById('htmlContent').value;
+    } else {
+        htmlBody = document.getElementById('emailContent').innerHTML;
+    }
+    
+    const campaignData = {
+        recipients: recipients,
+        selectedOnly: type === 'selected',
+        subject: document.getElementById('emailSubject').value,
+        htmlBody: htmlBody,
+        fromName: document.getElementById('fromName').value,
+        replyTo: document.getElementById('replyTo').value,
+        name: `Campaign ${new Date().toLocaleDateString()}`,
+        rateLimit: 20 // emails per minute
+    };
+    
+    if (!campaignData.subject) {
+        showToast('Please enter a subject line', 'error');
+        return;
+    }
+    
+    if (!confirm(`Send email to ${recipients.length} recipients?`)) {
+        return;
+    }
+    
+    try {
+        showLoading('Sending emails...');
+        const result = await runGoogleScript('sendMassEmails', campaignData);
+        hideLoading();
+        
+        if (result.success) {
+            showToast(`Campaign sent! ${result.summary.sent} sent, ${result.summary.errors} errors`, 'success');
+            
+            // Clear selections
+            AppState.emailRecipients.clear();
+            
+            // Refresh analytics
+            if (AppState.currentTab === 'analytics') {
+                displayAnalytics();
+            }
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        hideLoading();
+        showError('Campaign failed: ' + error.message);
+    }
+}
+
+// ====================================
+// TEMPLATES
+// ====================================
+
+async function displayTemplates() {
+    try {
+        const result = await runGoogleScript('getEmailTemplates');
+        if (result.success) {
+            AppState.templates = result.templates;
+            renderTemplates();
+        }
+    } catch (error) {
+        showError('Failed to load templates: ' + error.message);
+    }
+}
+
+function renderTemplates() {
+    const container = document.getElementById('templatesGrid');
+    
+    if (AppState.templates.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-file-alt"></i>
+                <p>No templates saved yet</p>
+                <button class="btn btn-primary" onclick="createNewTemplate()">
+                    Create Your First Template
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = AppState.templates.map(template => `
+        <div class="template-card">
+            <div class="template-header">
+                <h4>${template.name}</h4>
+                <div class="template-actions">
+                    <button class="icon-btn" onclick="loadTemplateIntoComposer('${template.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="icon-btn danger" onclick="deleteTemplate('${template.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="template-preview">
+                ${template.subject}
+            </div>
+            <div class="template-meta">
+                <span>Created ${formatDate(template.createdAt)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function createNewTemplate() {
+    navigateTo('compose');
+    // Add save as template button
+}
+
+function loadTemplateIntoComposer(templateId) {
+    const template = AppState.templates.find(t => t.id === templateId);
+    if (!template) return;
+    
+    document.getElementById('emailSubject').value = template.subject;
+    document.getElementById('emailContent').innerHTML = template.htmlBody;
+    
+    if (template.fromName) {
+        document.getElementById('fromName').value = template.fromName;
+    }
+    if (template.replyTo) {
+        document.getElementById('replyTo').value = template.replyTo;
+    }
+    
+    showToast('Template loaded', 'success');
+    navigateTo('compose');
+}
+
+// ====================================
+// ANALYTICS
+// ====================================
+
+async function displayAnalytics() {
+    try {
+        const result = await runGoogleScript('getCampaignAnalytics');
+        if (result.success) {
+            // Update metrics
+            document.getElementById('totalEmailsSent').textContent = result.overall.emailsSent;
+            document.getElementById('totalEmailsOpened').textContent = result.overall.emailsOpened;
+            document.getElementById('totalLinkClicks').textContent = result.overall.linkClicks;
+            document.getElementById('totalBounces').textContent = result.overall.bounces;
+            
+            // Calculate open rate
+            const openRate = result.overall.emailsSent > 0 ? 
+                ((result.overall.emailsOpened / result.overall.emailsSent) * 100).toFixed(1) : 0;
+            document.getElementById('openRate').textContent = openRate + '%';
+            
+            // TODO: Add chart visualization
+        }
+    } catch (error) {
+        showError('Failed to load analytics: ' + error.message);
+    }
+}
+
+// ====================================
+// CAMPAIGNS
+// ====================================
+
+async function displayCampaigns() {
+    const container = document.getElementById('campaignsList');
+    const campaigns = AppState.userData.campaigns || [];
+    
+    if (campaigns.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-paper-plane"></i>
+                <p>No campaigns sent yet</p>
+                <button class="btn btn-primary" onclick="navigateTo('compose')">
+                    Create Your First Campaign
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = campaigns.map(campaign => `
+        <div class="card">
+            <div class="card-body">
+                <h4>${campaign.name}</h4>
+                <p>Sent: ${formatDate(campaign.createdAt)}</p>
+                <p>Recipients: ${campaign.stats?.sent || 0}</p>
+                <p>Opens: ${Object.keys(campaign.opens || {}).length}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ====================================
+// PROFILE MANAGEMENT
+// ====================================
+
+function showProfileSettings() {
+    const modal = document.getElementById('profileModal');
+    const profile = AppState.userData.profile;
+    
+    document.getElementById('profileName').value = profile.name || '';
+    document.getElementById('profileFromName').value = profile.settings?.defaultFromName || '';
+    document.getElementById('profileReplyTo').value = profile.settings?.defaultReplyTo || '';
+    document.getElementById('profileSignature').value = profile.signature || '';
+    document.getElementById('profileNotifications').checked = profile.settings?.notifications !== false;
+    document.getElementById('profileDarkMode').checked = profile.settings?.darkMode || false;
+    
+    modal.classList.add('show');
+}
+
+async function saveProfile() {
+    const profileData = {
+        name: document.getElementById('profileName').value,
+        signature: document.getElementById('profileSignature').value,
+        settings: {
+            defaultFromName: document.getElementById('profileFromName').value,
+            defaultReplyTo: document.getElementById('profileReplyTo').value,
+            notifications: document.getElementById('profileNotifications').checked,
+            darkMode: document.getElementById('profileDarkMode').checked
+        }
+    };
+    
+    try {
+        const result = await runGoogleScript('updateProfile', profileData);
+        if (result.success) {
+            AppState.userData.profile = result.profile;
+            updateUserInterface();
+            showToast('Profile updated!', 'success');
+            closeModal('profileModal');
+        }
+    } catch (error) {
+        showError('Failed to save profile: ' + error.message);
+    }
+}
+
+// ====================================
+// IMPORT/EXPORT
+// ====================================
+
+async function analyzeSheet() {
+    const sheetUrl = document.getElementById('importSheetUrl').value;
+    if (!sheetUrl) {
+        showToast('Please enter a Google Sheet URL', 'error');
+        return;
+    }
+    
+    // TODO: Implement sheet analysis and mapping
+    showToast('Sheet analysis coming soon', 'info');
+}
+
+async function exportData() {
+    try {
+        showLoading('Preparing export...');
+        const result = await runGoogleScript('exportUserData');
+        hideLoading();
+        
+        if (result.success) {
+            window.open(result.downloadUrl, '_blank');
+            showToast('Data exported successfully!', 'success');
+        }
+    } catch (error) {
+        hideLoading();
+        showError('Export failed: ' + error.message);
+    }
+}
+
+// ====================================
+// SYNC FUNCTIONALITY
+// ====================================
+
+async function syncData() {
+    try {
+        showLoading('Syncing with Google Drive...');
+        await loadContacts();
+        hideLoading();
+        showToast('Data synced!', 'success');
+    } catch (error) {
+        hideLoading();
+        showError('Sync failed: ' + error.message);
+    }
+}
+
+// ====================================
+// UI UTILITIES
+// ====================================
+
+function initializeEditor() {
+    const content = document.getElementById('emailContent');
+    
+    content.addEventListener('paste', function(e) {
+        e.preventDefault();
+        const text = e.clipboardData.getData('text/plain');
+        document.execCommand('insertText', false, text);
+    });
+}
+
+function formatText(command) {
+    document.execCommand(command, false, null);
+    document.getElementById('emailContent').focus();
+}
+
+function createLink() {
+    const url = prompt('Enter URL:');
+    if (url) {
+        document.execCommand('createLink', false, url);
+    }
+}
+
+function insertImage() {
+    const url = prompt('Enter image URL:');
+    if (url) {
+        document.execCommand('insertImage', false, url);
+    }
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.remove('show');
+}
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    const icons = {
+        success: 'fa-check-circle',
+        error: 'fa-exclamation-circle',
+        warning: 'fa-exclamation-triangle',
+        info: 'fa-info-circle'
+    };
+    
+    toast.innerHTML = `
+        <i class="fas ${icons[type]} toast-icon"></i>
+        <div class="toast-message">${message}</div>
+        <button class="toast-close" onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 5000);
+}
+
+function showError(message) {
+    showToast(message, 'error');
+    console.error(message);
+}
+
+function showLoading(message = 'Loading...') {
+    const screen = document.getElementById('loadingScreen');
+    document.querySelector('.loading-text').textContent = message;
+    screen.classList.remove('hide');
+}
+
+function updateLoadingText(text) {
+    document.querySelector('.loading-text').textContent = text;
+}
+
+function hideLoading() {
+    document.getElementById('loadingScreen').classList.add('hide');
+}
+
+function showLoadingScreen(text) {
+    showLoading(text);
+}
+
+function hideLoadingScreen() {
+    setTimeout(hideLoading, 500);
+}
+
+// ====================================
+// UTILITY FUNCTIONS
+// ====================================
+
+function runGoogleScript(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+        google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            [functionName](...args);
+    });
+}
+
+function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString();
+}
+
+function formatDateTime(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleString();
+}
+
+function updateCounts() {
+    document.getElementById('contactCount').textContent = AppState.contacts.length;
+    document.getElementById('callCount').textContent = AppState.callLogs.length;
+}
+
+// ====================================
+// EVENT LISTENERS
+// ====================================
+
+function initializeEventListeners() {
+    // Close modals on outside click
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.classList.remove('show');
+            }
+        });
+    });
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Escape to close modals
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal.show').forEach(modal => {
+                modal.classList.remove('show');
+            });
+        }
+        
+        // Ctrl/Cmd + S to save
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            // Context-specific save
+            if (AppState.currentTab === 'crm-settings') {
+                saveCRMSettings();
+            }
+        }
+    });
+}
+
+// Help function
+function showHelp() {
+    window.open('https://github.com/yourusername/swiftsend-pro/wiki', '_blank');
+}
+</script>
