@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwiftSend Pro v3 - CRM & Email Tool</title>
+    
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Include CSS -->
+    <?!= include('styles'); ?>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-content">
+            <div class="logo-animation">
+                <i class="fas fa-rocket"></i>
+            </div>
+            <h2>SwiftSend Pro v3</h2>
+            <div class="loading-bar">
+                <div class="loading-progress"></div>
+            </div>
+            <p class="loading-text">Loading your CRM...</p>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div class="dashboard-container" id="dashboard">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-rocket"></i>
+                    <span>SwiftSend Pro</span>
+                    <span class="version-badge">v3</span>
+                </div>
+                <button class="mobile-toggle" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+            
+            <!-- User Profile Section -->
+            <div class="user-profile-section">
+                <div class="user-avatar" id="userAvatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-info">
+                    <div class="user-name" id="userName">Loading...</div>
+                    <div class="user-email" id="userEmail">...</div>
+                </div>
+                <button class="profile-settings-btn" onclick="showProfileSettings()">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+            
+            <!-- Navigation -->
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">CRM</div>
+                    <ul>
+                        <li class="nav-item">
+                            <button class="nav-link active" onclick="navigateTo('contacts')" data-tab="contacts">
+                                <i class="fas fa-address-book"></i>
+                                <span>Contacts</span>
+                                <span class="nav-badge" id="contactCount">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('calls')" data-tab="calls">
+                                <i class="fas fa-phone"></i>
+                                <span>Call Logs</span>
+                                <span class="nav-badge" id="callCount">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('crm-settings')" data-tab="crm-settings">
+                                <i class="fas fa-sliders-h"></i>
+                                <span>CRM Settings</span>
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">Email Campaign</div>
+                    <ul>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('compose')" data-tab="compose">
+                                <i class="fas fa-edit"></i>
+                                <span>Compose</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('templates')" data-tab="templates">
+                                <i class="fas fa-file-alt"></i>
+                                <span>Templates</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('campaigns')" data-tab="campaigns">
+                                <i class="fas fa-paper-plane"></i>
+                                <span>Campaigns</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('analytics')" data-tab="analytics">
+                                <i class="fas fa-chart-line"></i>
+                                <span>Analytics</span>
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">Tools</div>
+                    <ul>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('import')" data-tab="import">
+                                <i class="fas fa-file-import"></i>
+                                <span>Import</span>
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" onclick="navigateTo('export')" data-tab="export">
+                                <i class="fas fa-file-export"></i>
+                                <span>Export</span>
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+            
+            <!-- Quota Display -->
+            <div class="quota-display">
+                <div class="quota-title">Daily Email Quota</div>
+                <div class="quota-bar">
+                    <div class="quota-fill" id="quotaFill"></div>
+                </div>
+                <div class="quota-text">
+                    <span id="quotaUsed">0</span> / <span id="quotaTotal">1500</span>
+                </div>
+                <small class="quota-hint">Resets daily at midnight</small>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <div class="header-left">
+                    <button class="mobile-menu-btn" onclick="toggleSidebar()">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1 class="page-title" id="pageTitle">Contacts</h1>
+                </div>
+                <div class="header-right">
+                    <button class="header-btn" onclick="syncData()">
+                        <i class="fas fa-sync"></i>
+                        <span class="btn-text">Sync</span>
+                    </button>
+                    <button class="header-btn" onclick="showHelp()">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Container -->
+            <div class="content-container">
+                <!-- Contacts Tab -->
+                <section id="contacts" class="tab-content active">
+                    <div class="content-header">
+                        <h2>Contact Management</h2>
+                        <div class="header-actions">
+                            <button class="btn btn-primary" onclick="showContactForm()">
+                                <i class="fas fa-plus"></i>
+                                Add Contact
+                            </button>
+                            <button class="btn btn-secondary" onclick="navigateTo('import')">
+                                <i class="fas fa-file-import"></i>
+                                Import
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Search and Filter -->
+                    <div class="search-filter-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="contactSearch" placeholder="Search contacts..." onkeyup="searchContacts()">
+                        </div>
+                        <div class="filter-controls">
+                            <select id="contactFilter" onchange="filterContacts()">
+                                <option value="all">All Contacts</option>
+                                <option value="recent">Recently Added</option>
+                                <option value="has-calls">Has Call History</option>
+                                <option value="no-calls">No Call History</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Contacts Grid -->
+                    <div class="contacts-grid" id="contactsGrid">
+                        <div class="empty-state">
+                            <i class="fas fa-users"></i>
+                            <p>No contacts yet</p>
+                            <button class="btn btn-primary" onclick="showContactForm()">
+                                Add Your First Contact
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Call Logs Tab -->
+                <section id="calls" class="tab-content">
+                    <div class="content-header">
+                        <h2>Call Activity</h2>
+                        <div class="header-actions">
+                            <button class="btn btn-primary" onclick="showCallLogForm()">
+                                <i class="fas fa-phone-plus"></i>
+                                Log Call
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Call Stats -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-phone"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="totalCallsCount">0</div>
+                                <div class="stat-label">Total Calls</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon today">
+                                <i class="fas fa-calendar-day"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="todayCallsCount">0</div>
+                                <div class="stat-label">Today's Calls</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon upcoming">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="upcomingCallsCount">0</div>
+                                <div class="stat-label">Upcoming</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Call Logs List -->
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="call-logs-list" id="callLogsList">
+                                <div class="empty-state">
+                                    <i class="fas fa-phone-slash"></i>
+                                    <p>No call logs yet</p>
+                                    <button class="btn btn-primary" onclick="showCallLogForm()">
+                                        Log Your First Call
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- CRM Settings Tab -->
+                <section id="crm-settings" class="tab-content">
+                    <div class="content-header">
+                        <h2>CRM Configuration</h2>
+                        <p>Customize your CRM fields and settings</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Custom Fields</h3>
+                            <button class="btn btn-sm btn-primary" onclick="addCustomField()">
+                                <i class="fas fa-plus"></i>
+                                Add Field
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="fields-list" id="crmFieldsList">
+                                <!-- Fields will be dynamically loaded -->
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button class="btn btn-success" onclick="saveCRMSettings()">
+                                <i class="fas fa-save"></i>
+                                Save Settings
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Compose Email Tab -->
+                <section id="compose" class="tab-content">
+                    <div class="content-header">
+                        <h2>Compose Email Campaign</h2>
+                        <p>Create and send personalized emails to your contacts</p>
+                    </div>
+
+                    <!-- Recipients Selection -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Select Recipients</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="recipient-selection">
+                                <label class="radio-label">
+                                    <input type="radio" name="recipientType" value="all" checked onchange="updateRecipientSelection()">
+                                    <span>All Contacts (<span id="allContactsCount">0</span>)</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="recipientType" value="selected" onchange="updateRecipientSelection()">
+                                    <span>Selected Contacts</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="recipientType" value="filter" onchange="updateRecipientSelection()">
+                                    <span>Custom Filter</span>
+                                </label>
+                            </div>
+                            <div id="recipientFilterOptions" style="display: none;">
+                                <!-- Filter options will appear here -->
+                            </div>
+                            <div class="recipient-count-display">
+                                <i class="fas fa-users"></i>
+                                <span>Recipients: <strong id="selectedRecipientCount">0</strong></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Email Settings -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Email Settings</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label class="form-label">From Name</label>
+                                    <input type="text" class="form-input" id="fromName" placeholder="Your Name">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Reply-To Email</label>
+                                    <input type="email" class="form-input" id="replyTo" placeholder="reply@example.com">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Subject Line</label>
+                                <input type="text" class="form-input" id="emailSubject" 
+                                       placeholder="Hello {{firstName}}, important update!">
+                                <small class="form-hint">Use merge tags like {{firstName}}, {{company}}, etc.</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Email Content -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Email Content</h3>
+                            <div class="header-actions">
+                                <button class="btn btn-sm btn-secondary" onclick="loadTemplate()">
+                                    <i class="fas fa-folder-open"></i>
+                                    Load Template
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="merge-tags-helper">
+                                <strong>Available Merge Tags:</strong>
+                                <div class="merge-tags" id="mergeTags">
+                                    <!-- Tags will be dynamically loaded based on CRM fields -->
+                                </div>
+                            </div>
+                            <div class="editor-container">
+                                <div class="editor-toolbar">
+                                    <button class="toolbar-btn" onclick="formatText('bold')"><i class="fas fa-bold"></i></button>
+                                    <button class="toolbar-btn" onclick="formatText('italic')"><i class="fas fa-italic"></i></button>
+                                    <button class="toolbar-btn" onclick="formatText('underline')"><i class="fas fa-underline"></i></button>
+                                    <span class="toolbar-separator"></span>
+                                    <button class="toolbar-btn" onclick="formatText('insertOrderedList')"><i class="fas fa-list-ol"></i></button>
+                                    <button class="toolbar-btn" onclick="formatText('insertUnorderedList')"><i class="fas fa-list-ul"></i></button>
+                                    <span class="toolbar-separator"></span>
+                                    <button class="toolbar-btn" onclick="createLink()"><i class="fas fa-link"></i></button>
+                                    <button class="toolbar-btn" onclick="insertImage()"><i class="fas fa-image"></i></button>
+                                </div>
+                                <div class="editor-content" id="emailContent" contenteditable="true">
+                                    <p>Hello {{firstName}},</p>
+                                    <p>Type your email content here...</p>
+                                    <p>Best regards,<br>{{fromName}}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button class="btn btn-secondary" onclick="sendTestEmail()">
+                                <i class="fas fa-envelope"></i>
+                                Send Test
+                            </button>
+                            <button class="btn btn-success" onclick="sendCampaign()">
+                                <i class="fas fa-paper-plane"></i>
+                                Send Campaign
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Templates Tab -->
+                <section id="templates" class="tab-content">
+                    <div class="content-header">
+                        <h2>Email Templates</h2>
+                        <div class="header-actions">
+                            <button class="btn btn-primary" onclick="createNewTemplate()">
+                                <i class="fas fa-plus"></i>
+                                Create Template
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="templates-grid" id="templatesGrid">
+                        <div class="empty-state">
+                            <i class="fas fa-file-alt"></i>
+                            <p>No templates saved yet</p>
+                            <button class="btn btn-primary" onclick="createNewTemplate()">
+                                Create Your First Template
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Campaigns Tab -->
+                <section id="campaigns" class="tab-content">
+                    <div class="content-header">
+                        <h2>Campaign History</h2>
+                        <p>View your past email campaigns and their performance</p>
+                    </div>
+
+                    <div class="campaigns-list" id="campaignsList">
+                        <div class="empty-state">
+                            <i class="fas fa-paper-plane"></i>
+                            <p>No campaigns sent yet</p>
+                            <button class="btn btn-primary" onclick="navigateTo('compose')">
+                                Create Your First Campaign
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Analytics Tab -->
+                <section id="analytics" class="tab-content">
+                    <div class="content-header">
+                        <h2>Analytics Dashboard</h2>
+                        <p>Track your email performance and engagement</p>
+                    </div>
+
+                    <div class="analytics-grid">
+                        <div class="metric-card">
+                            <div class="metric-icon">
+                                <i class="fas fa-paper-plane"></i>
+                            </div>
+                            <div class="metric-content">
+                                <div class="metric-value" id="totalEmailsSent">0</div>
+                                <div class="metric-label">Emails Sent</div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon opened">
+                                <i class="fas fa-envelope-open"></i>
+                            </div>
+                            <div class="metric-content">
+                                <div class="metric-value" id="totalEmailsOpened">0</div>
+                                <div class="metric-label">Emails Opened</div>
+                                <div class="metric-rate" id="openRate">0%</div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon clicked">
+                                <i class="fas fa-mouse-pointer"></i>
+                            </div>
+                            <div class="metric-content">
+                                <div class="metric-value" id="totalLinkClicks">0</div>
+                                <div class="metric-label">Link Clicks</div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon bounced">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="metric-content">
+                                <div class="metric-value" id="totalBounces">0</div>
+                                <div class="metric-label">Bounces</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Campaign Performance</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="analyticsChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Import Tab -->
+                <section id="import" class="tab-content">
+                    <div class="content-header">
+                        <h2>Import Contacts</h2>
+                        <p>Import contacts from Google Sheets</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-icon">
+                            <i class="fab fa-google-drive"></i>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label class="form-label">Google Sheet URL</label>
+                                <input type="text" class="form-input" id="importSheetUrl" 
+                                       placeholder="https://docs.google.com/spreadsheets/d/...">
+                            </div>
+                            <button class="btn btn-primary" onclick="analyzeSheet()">
+                                <i class="fas fa-search"></i>
+                                Analyze Sheet
+                            </button>
+
+                            <div id="importMapping" style="display: none;">
+                                <h4>Map Columns to CRM Fields</h4>
+                                <div id="mappingContainer">
+                                    <!-- Mapping fields will appear here -->
+                                </div>
+                                <button class="btn btn-success" onclick="executeImport()">
+                                    <i class="fas fa-file-import"></i>
+                                    Import Contacts
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Export Tab -->
+                <section id="export" class="tab-content">
+                    <div class="content-header">
+                        <h2>Export Data</h2>
+                        <p>Export your CRM data for backup or analysis</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Export Options</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="export-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="exportContacts" checked>
+                                    <span>Contacts</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="exportCallLogs" checked>
+                                    <span>Call Logs</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="exportCampaigns" checked>
+                                    <span>Campaign History</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="exportTemplates" checked>
+                                    <span>Email Templates</span>
+                                </label>
+                            </div>
+                            <button class="btn btn-primary" onclick="exportData()">
+                                <i class="fas fa-download"></i>
+                                Export to JSON
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- Contact Form Modal -->
+    <div class="modal" id="contactModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="contactModalTitle">Add Contact</h3>
+                <button class="modal-close" onclick="closeModal('contactModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="contactForm">
+                    <div id="contactFormFields">
+                        <!-- Fields will be dynamically generated based on CRM schema -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('contactModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveContact()">Save Contact</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Call Log Modal -->
+    <div class="modal" id="callLogModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Log Call</h3>
+                <button class="modal-close" onclick="closeModal('callLogModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="callLogForm">
+                    <div class="form-group">
+                        <label class="form-label">Contact</label>
+                        <select class="form-select" id="callContactId">
+                            <option value="">Select a contact...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Call Date & Time</label>
+                        <input type="datetime-local" class="form-input" id="callDateTime">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Duration (minutes)</label>
+                        <input type="number" class="form-input" id="callDuration" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Call Outcome</label>
+                        <select class="form-select" id="callOutcome">
+                            <option value="answered">Answered - Spoke</option>
+                            <option value="voicemail">Left Voicemail</option>
+                            <option value="no-answer">No Answer</option>
+                            <option value="busy">Busy</option>
+                            <option value="wrong-number">Wrong Number</option>
+                            <option value="scheduled">Scheduled Callback</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-textarea" id="callNotes" rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Next Call Date</label>
+                        <input type="date" class="form-input" id="nextCallDate">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('callLogModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveCallLog()">Save Call Log</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Settings Modal -->
+    <div class="modal" id="profileModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Profile Settings</h3>
+                <button class="modal-close" onclick="closeModal('profileModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="profileForm">
+                    <div class="form-group">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" class="form-input" id="profileName">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Default From Name (for emails)</label>
+                        <input type="text" class="form-input" id="profileFromName">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Default Reply-To Email</label>
+                        <input type="email" class="form-input" id="profileReplyTo">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email Signature</label>
+                        <textarea class="form-textarea" id="profileSignature" rows="4"></textarea>
+                    </div>
+                    <div class="settings-section">
+                        <h4>Preferences</h4>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="profileNotifications">
+                            <span>Enable notifications</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="profileDarkMode">
+                            <span>Dark mode (coming soon)</span>
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('profileModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Include JavaScript -->
+    <?!= include('script'); ?>
+</body>
+</html>
